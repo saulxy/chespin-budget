@@ -1,0 +1,28 @@
+# Chespin Configuration File
+
+# Wake word details (must be lowercase)
+wake_word: "chespin"
+
+# Path to the downloaded Vosk model folder.
+# By default, downloads should be placed under a models/ folder in the project root.
+vosk_model_path: "models/vosk-model-small-en-us-0.15"
+
+# Index of the audio input device to use.
+# Set to null to use the system default microphone.
+audio_device_index: null
+
+# HDMI Control Settings
+# Supported backends: "auto", "wlr-randr", "vcgencmd", "mock"
+# - "auto": Detects available environment tools (first wlr-randr, then vcgencmd, fallback to mock)
+# - "wlr-randr": Wayland HDMI control (for modern Pi OS e.g., Bookworm)
+# - "vcgencmd": X11/legacy HDMI control
+# - "mock": Test mode (logs screen state changes to console without actual hardware calls)
+screen_backend: "auto"
+
+# The display output ID to control. Usually HDMI-A-1 or HDMI-1.
+# Only used for the wlr-randr backend.
+display_output_id: "HDMI-A-1"
+
+# Automatically turn off the screen after X seconds of inactivity.
+# Set to null to disable automatic timeout (screen will stay on until manually turned off).
+screen_timeout_seconds: 60
