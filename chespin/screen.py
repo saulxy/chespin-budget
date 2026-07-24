@@ -33,7 +33,30 @@ class ScreenController:
         success = False
         
         if self.backend == "wlr-randr":
-            success = self._run_command(["wlr-randr", "--output", self.output_id, "--on"])
+            # 1. Try with configured output_id + --preferred (fixes 'failed to apply configuration')
+            success = self._run_command(["wlr-randr", "--output", self.output_id, "--on", "--preferred"])
+            
+            # 2. Try plain --on if --preferred fails
+            if not success:
+                logger.warning(f"wlr-randr --on --preferred failed for '{self.output_id}'. Retrying plain --on...")
+                success = self._run_command(["wlr-randr", "--output", self.output_id, "--on"])
+            
+            # 3. If configured output failed, search for available wlr-randr outputs and try them
+            if not success:
+                detected_outputs = self._get_wlr_outputs()
+                for out_id in detected_outputs:
+                    if out_id != self.output_id:
+                        logger.info(f"Retrying wlr-randr on detected output '{out_id}'...")
+                        success = self._run_command(["wlr-randr", "--output", out_id, "--on", "--preferred"])
+                        if success:
+                            self.output_id = out_id
+                            break
+            
+            # 4. Fallback to vcgencmd if available
+            if not success and shutil.which("vcgencmd"):
+                logger.warning("wlr-randr commands failed. Attempting fallback via vcgencmd...")
+                success = self._run_command(["vcgencmd", "display_power", "1"])
+                
         elif self.backend == "vcgencmd":
             success = self._run_command(["vcgencmd", "display_power", "1"])
         elif self.backend == "mock":
@@ -51,6 +74,22 @@ class ScreenController:
         
         if self.backend == "wlr-randr":
             success = self._run_command(["wlr-randr", "--output", self.output_id, "--off"])
+            
+            # If configured output_id failed, try detected outputs
+            if not success:
+                detected_outputs = self._get_wlr_outputs()
+                for out_id in detected_outputs:
+                    if out_id != self.output_id:
+                        logger.info(f"Retrying wlr-randr off on detected output '{out_id}'...")
+                        success = self._run_command(["wlr-randr", "--output", out_id, "--off"])
+                        if success:
+                            self.output_id = out_id
+                            break
+                            
+            if not success and shutil.which("vcgencmd"):
+                logger.warning("wlr-randr --off failed. Attempting fallback via vcgencmd...")
+                success = self._run_command(["vcgencmd", "display_power", "0"])
+                
         elif self.backend == "vcgencmd":
             success = self._run_command(["vcgencmd", "display_power", "0"])
         elif self.backend == "mock":
@@ -60,6 +99,20 @@ class ScreenController:
         if success:
             self.is_screen_on = False
         return success
+
+    def _get_wlr_outputs(self):
+        """Query wlr-randr for available output display names."""
+        try:
+            res = subprocess.run(["wlr-randr"], capture_output=True, text=True)
+            outputs = []
+            for line in res.stdout.splitlines():
+                if line and not line.startswith(" ") and not line.startswith("\t"):
+                    parts = line.split()
+                    if parts:
+                        outputs.append(parts[0])
+            return outputs
+        except Exception:
+            return []
 
     def _run_command(self, cmd):
         """Execute a subprocess command and handle logging/exceptions."""

@@ -23,6 +23,7 @@ chespin/
 │       └── vosk_detector.py   # Vosk speech recognition backend
 └── scripts/                   # User-executable command-line utilities
     ├── wake_screen.py         # The primary background listener script
+    ├── on_screen.py           # A script to manually turn on the display
     └── off_screen.py          # A script to manually shut off the display
 ```
 
@@ -98,9 +99,14 @@ python scripts/wake_screen.py
 ```
 Speak your wake word **"CHESPIN"** (or whatever word is configured). You will see logs in the console confirming that the wake word was recognized and that the screen is being activated.
 
-### Turn Screen Off Manually
+### Turn Screen On / Off Manually
 
-To manually turn off the HDMI port, execute:
+To manually turn on the HDMI port:
+```bash
+python scripts/on_screen.py
+```
+
+To manually turn off the HDMI port:
 ```bash
 python scripts/off_screen.py
 ```

@@ -1,14 +1,22 @@
 import queue
 import logging
 import sounddevice as sd
+import numpy as np
+
+try:
+    from scipy import signal
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
 
 logger = logging.getLogger(__name__)
 
 class AudioStreamer:
-    """Wrapper to capture microphone audio using sounddevice and pipe it safely into queues."""
-    def __init__(self, sample_rate=16000, device_index=None, block_size=4000):
+    """Wrapper to capture microphone audio at native hardware rate (48kHz) and downsample to 16kHz for Vosk."""
+    def __init__(self, sample_rate=16000, input_sample_rate=48000, device_index=None, block_size=12000):
         self.sample_rate = sample_rate
-        self.device_index = device_index
+        self.input_sample_rate = input_sample_rate
+        self.device_index = 2
         self.block_size = block_size
         self.queue = queue.Queue()
         self.stream = None
@@ -17,18 +25,37 @@ class AudioStreamer:
         """Callback function for the sounddevice raw input stream."""
         if status:
             logger.warning(f"Audio stream status: {status}")
-        self.queue.put(bytes(indata))
+        
+        audio_np = np.frombuffer(indata, dtype=np.int16)
+        
+        if self.input_sample_rate != self.sample_rate:
+            step = self.input_sample_rate // self.sample_rate
+            if HAS_SCIPY:
+                try:
+                    audio_np = signal.decimate(audio_np, step).astype(np.int16)
+                except Exception:
+                    audio_np = audio_np[::step]
+            else:
+                audio_np = audio_np[::step]
+
+        self.queue.put(audio_np.tobytes())
 
     def start(self):
         """Start capturing audio from the input device."""
         if self.stream is not None:
             return
-        
-        logger.info(f"Initializing audio capture (Samplerate: {self.sample_rate}Hz, Device: {self.device_index or 'Default'})...")
+
+        ratio = max(1, self.input_sample_rate // self.sample_rate)
+        stream_block_size = self.block_size * ratio
+
+        logger.info(
+            f"Initializing audio capture (Input: {self.input_sample_rate}Hz -> Output: {self.sample_rate}Hz, "
+            f"Device: {self.device_index or 'Default'})..."
+        )
         try:
             self.stream = sd.RawInputStream(
-                samplerate=self.sample_rate,
-                blocksize=self.block_size,
+                samplerate=self.input_sample_rate,
+                blocksize=stream_block_size,
                 device=self.device_index,
                 dtype='int16',
                 channels=1,
@@ -36,10 +63,9 @@ class AudioStreamer:
             )
             self.stream.start()
             logger.info("Audio stream started successfully.")
-        except Exception as e:
-            logger.error(f"Failed to start audio stream: {e}")
-            logger.error("Please verify that your microphone is plugged in, and verify available devices using audio.py's list_devices().")
-            raise
+        except Exception as exc:
+            logger.error(f"Failed to start audio stream: {exc}")
+            raise exc
 
     def stop(self):
         """Stop capturing audio and release resources."""
@@ -81,3 +107,4 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     print("--- Available Audio Devices ---")
     print(AudioStreamer.list_devices())
+

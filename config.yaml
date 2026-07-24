@@ -7,9 +7,10 @@ wake_word: "chespin"
 # By default, downloads should be placed under a models/ folder in the project root.
 vosk_model_path: "models/vosk-model-small-en-us-0.15"
 
-# Index of the audio input device to use.
+# Index or name of the audio input device to use.
+# Can be an integer index (e.g. 1) or a string name (e.g. "default", "hw:1,0").
 # Set to null to use the system default microphone.
-audio_device_index: null
+audio_device_index: "mic_chespin"
 
 # HDMI Control Settings
 # Supported backends: "auto", "wlr-randr", "vcgencmd", "mock"
