@@ -1,5 +1,9 @@
 # Chespin Configuration File
 
+# Wake Word Settings
+# Set to false to disable wake word listening (default: true)
+wake_word_enabled: true
+
 # Wake word details (must be lowercase)
 wake_word: "chespin"
 
@@ -27,3 +31,11 @@ display_output_id: "HDMI-A-1"
 # Automatically turn off the screen after X seconds of inactivity.
 # Set to null to disable automatic timeout (screen will stay on until manually turned off).
 screen_timeout_seconds: 60
+
+# Hourly Screen Routine Settings
+# Automatically turn on the screen at the top of every hour (e.g., 6:00 PM, 7:00 PM)
+# Set to false to disable the hourly routine
+hourly_routine_enabled: true
+
+# Duration in seconds to keep the screen on during the hourly routine (default: 600 = 10 minutes).
+hourly_routine_duration_seconds: 600

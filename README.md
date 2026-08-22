@@ -86,10 +86,16 @@ pip install -r requirements.txt
 
 ### Configuration
 
-Open `config.yaml` to adjust the settings:
+*   `wake_word_enabled`: Enable or disable wake-word voice listening (default: `true`).
 *   `wake_word`: The word to listen for (default: `"chespin"`).
 *   `screen_backend`: Set to `"auto"` (detects Raspberry Pi system settings automatically), `"wlr-randr"` (Wayland), `"vcgencmd"` (X11/legacy), or `"mock"` (print to console only, useful for testing on Windows/non-Pi).
-*   `screen_timeout_seconds`: Time (in seconds) the screen stays on before automatically turning off. Set to `null` to leave it on permanently until turned off manually.
+*   `screen_timeout_seconds`: Time (in seconds) the screen stays on after wake word detection before automatically turning off. Set to `null` to leave it on permanently until turned off manually.
+*   `hourly_routine_enabled`: Automatically power on the screen every hour at the top of the hour (default: `true`).
+*   `hourly_routine_duration_seconds`: Duration (in seconds) the screen remains on during each hourly cycle before turning off (default: `600` = 10 minutes).
+
+> [!NOTE]
+> At least one activation method (`wake_word_enabled` or `hourly_routine_enabled`) must be set to `true` for `wake_screen.py` to run. If both are disabled, the script will exit with an error.
+
 
 ### Start the Daemon
 
