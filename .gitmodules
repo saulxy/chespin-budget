@@ -1,0 +1,3 @@
+[submodule "chespin-dashboard"]
+	path = chespin-dashboard
+	url = https://github.com/saulxy/chespin-dashboard.git
