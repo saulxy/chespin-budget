@@ -3,17 +3,28 @@ import glob
 import subprocess
 import shutil
 import logging
+import threading
+
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
 
 logger = logging.getLogger(__name__)
 
 class ScreenController:
     """Controls HDMI screen power on Raspberry Pi using various command line interfaces."""
     
-    def __init__(self, backend="auto", output_id="HDMI-A-1"):
+    def __init__(self, backend="auto", output_id="HDMI-A-1", sound_file=None, config_path=None):
         self.output_id = output_id
         self.backend = self._resolve_backend(backend)
         self.is_screen_on = True  # Initial assumption
+        self.project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        self.sound_file = self._resolve_sound_file(sound_file, config_path)
         logger.info(f"ScreenController initialized. Using '{self.backend}' backend.")
+        if self.sound_file:
+            logger.info(f"Screen activation sound configured: {self.sound_file}")
 
     def _resolve_backend(self, backend):
         """Determine which backend to use depending on system tools available."""
@@ -28,6 +39,144 @@ class ScreenController:
         else:
             logger.warning("Neither 'wlr-randr' nor 'vcgencmd' was found in PATH. Falling back to 'mock' mode.")
             return "mock"
+
+    def _resolve_sound_path(self, sound_name):
+        """Resolve a sound filename or relative path within resource folders or project root."""
+        if not sound_name:
+            return None
+
+        # Check if already an absolute path and exists
+        if os.path.isabs(sound_name) and os.path.isfile(sound_name):
+            return sound_name
+
+        # Search candidates in priority order: resource/ -> resources/ -> project root
+        candidates = [
+            os.path.join(self.project_root, "resource", sound_name),
+            os.path.join(self.project_root, "resources", sound_name),
+            os.path.join(self.project_root, sound_name),
+        ]
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate
+
+        logger.warning(f"Audio file '{sound_name}' not found in candidate paths: {candidates}")
+        return None
+
+    def _resolve_sound_file(self, sound_file, config_path=None):
+        """Determine and resolve the sound file to play from parameters or config.yaml."""
+        if sound_file is False:
+            return None
+
+        # If explicitly passed as a string
+        if isinstance(sound_file, str) and sound_file.strip():
+            return self._resolve_sound_path(sound_file.strip())
+
+        # Otherwise, attempt to load sound setting from config.yaml
+        cfg_file = config_path or os.path.join(self.project_root, "config.yaml")
+        if os.path.isfile(cfg_file) and HAS_YAML:
+            try:
+                with open(cfg_file, "r") as f:
+                    config = yaml.safe_load(f) or {}
+                # Check known keys for sound configuration
+                configured_sound = config.get("screen_on_sound")
+                if configured_sound is None:
+                    configured_sound = config.get("sound_file")
+                if configured_sound is None:
+                    configured_sound = config.get("wake_sound")
+
+                if configured_sound is False or configured_sound == "" or configured_sound is None:
+                    return None
+
+                return self._resolve_sound_path(str(configured_sound).strip())
+            except Exception as e:
+                logger.warning(f"Could not parse sound setting from {cfg_file}: {e}")
+
+        # Fallback default: check if resource/wake.wav exists
+        default_candidate = os.path.join(self.project_root, "resource", "wake.wav")
+        if os.path.isfile(default_candidate):
+            return default_candidate
+
+        return None
+
+    def play_sound(self, sound_file=None):
+        """Reproduce a WAV sound notification when the screen turns on."""
+        sound_path = self._resolve_sound_path(sound_file) if sound_file else self.sound_file
+        if not sound_path:
+            logger.debug("No sound file configured for playback.")
+            return False
+
+        if not os.path.isfile(sound_path):
+            logger.warning(f"Sound file not found for playback: {sound_path}")
+            return False
+
+        logger.info(f"Playing screen activation sound: {sound_path}")
+
+        # 1. On Windows: use native winsound (built-in standard library, async, non-blocking)
+        try:
+            import winsound
+            winsound.PlaySound(sound_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            return True
+        except (ImportError, RuntimeError):
+            pass
+        except Exception as e:
+            logger.warning(f"winsound playback failed: {e}")
+
+        # 2. On Linux / Raspberry Pi: try system CLI audio utilities (aplay for ALSA, paplay, pw-play)
+        cli_players = ["aplay", "paplay", "pw-play"]
+        for player in cli_players:
+            if shutil.which(player):
+                try:
+                    args = [player, "-q", sound_path] if player == "aplay" else [player, sound_path]
+                    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return True
+                except Exception as e:
+                    logger.warning(f"CLI player '{player}' failed: {e}")
+
+        # 3. On macOS: try afplay
+        if shutil.which("afplay"):
+            try:
+                subprocess.Popen(["afplay", sound_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
+            except Exception as e:
+                logger.warning(f"afplay failed: {e}")
+
+        # 4. Universal Fallback: sounddevice + wave + numpy (using existing project dependencies)
+        try:
+            import wave
+            import numpy as np
+            import sounddevice as sd
+
+            def _play_worker():
+                try:
+                    with wave.open(sound_path, "rb") as wf:
+                        framerate = wf.getframerate()
+                        n_channels = wf.getnchannels()
+                        sampwidth = wf.getsampwidth()
+                        raw_data = wf.readframes(wf.getnframes())
+
+                        if sampwidth == 1:
+                            data = (np.frombuffer(raw_data, dtype=np.uint8).astype(np.float32) - 128) / 128.0
+                        elif sampwidth == 2:
+                            data = np.frombuffer(raw_data, dtype=np.int16).astype(np.float32) / 32768.0
+                        elif sampwidth == 4:
+                            data = np.frombuffer(raw_data, dtype=np.int32).astype(np.float32) / 2147483648.0
+                        else:
+                            data = np.frombuffer(raw_data, dtype=np.int16)
+
+                        if n_channels > 1:
+                            data = data.reshape(-1, n_channels)
+
+                        sd.play(data, framerate)
+                        sd.wait()
+                except Exception as ex:
+                    logger.warning(f"sounddevice audio playback thread error: {ex}")
+
+            threading.Thread(target=_play_worker, daemon=True).start()
+            return True
+        except Exception as e:
+            logger.warning(f"Universal sounddevice fallback playback failed: {e}")
+
+        return False
 
     def turn_on(self):
         """Power ON the screen."""
@@ -67,6 +216,10 @@ class ScreenController:
             
         if success:
             self.is_screen_on = True
+            try:
+                self.play_sound()
+            except Exception as e:
+                logger.warning(f"Failed to play screen activation sound: {e}")
         return success
 
     def turn_off(self):

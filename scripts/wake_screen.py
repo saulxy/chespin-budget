@@ -70,6 +70,7 @@ def main():
     backend = config.get("screen_backend", "auto")
     output_id = config.get("display_output_id", "HDMI-A-1")
     timeout = config.get("screen_timeout_seconds", 60)
+    sound_file = config.get("screen_on_sound", config.get("sound_file", "wake.wav"))
     hourly_enabled = config.get("hourly_routine_enabled", True)
     hourly_duration = config.get("hourly_routine_duration_seconds", 600)
     
@@ -101,7 +102,7 @@ def main():
     detector = None
     streamer = None
     try:
-        screen_controller = ScreenController(backend=backend, output_id=output_id)
+        screen_controller = ScreenController(backend=backend, output_id=output_id, sound_file=sound_file)
         if wake_word_enabled:
             detector = VoskWakeWordDetector(wake_word=wake_word, model_path=model_path)
             streamer = AudioStreamer(device_index=device_index)

@@ -22,6 +22,7 @@ def main():
     config_path = os.path.join(project_root, "config.yaml")
     backend = "auto"
     output_id = "HDMI-A-1"
+    sound_file = None
     
     # Load configuration if available
     if os.path.exists(config_path):
@@ -31,12 +32,13 @@ def main():
                 if config:
                     backend = config.get("screen_backend", "auto")
                     output_id = config.get("display_output_id", "HDMI-A-1")
+                    sound_file = config.get("screen_on_sound", config.get("sound_file", None))
         except Exception as e:
             logger.warning(f"Could not read config.yaml ({e}). Proceeding with default values.")
 
     logger.info(f"Triggering screen ON command via backend: '{backend}'...")
     try:
-        screen_controller = ScreenController(backend=backend, output_id=output_id)
+        screen_controller = ScreenController(backend=backend, output_id=output_id, sound_file=sound_file)
         if screen_controller.turn_on():
             logger.info("Screen turned ON successfully.")
         else:

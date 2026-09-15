@@ -13,6 +13,8 @@ chespin/
 ├── README.md                  # This file
 ├── requirements.txt           # Python packages required
 ├── config.yaml                # Main configuration settings
+├── resource/                  # Audio notifications and assets
+│   └── wake.wav               # Wake chime audio played on screen turn-on
 ├── chespin/                   # Core application package
 │   ├── __init__.py
 │   ├── audio.py               # Sound capture and stream abstraction
@@ -89,6 +91,7 @@ pip install -r requirements.txt
 *   `wake_word_enabled`: Enable or disable wake-word voice listening (default: `true`).
 *   `wake_word`: The word to listen for (default: `"chespin"`).
 *   `screen_backend`: Set to `"auto"` (detects Raspberry Pi system settings automatically), `"wlr-randr"` (Wayland), `"vcgencmd"` (X11/legacy), or `"mock"` (print to console only, useful for testing on Windows/non-Pi).
+*   `screen_on_sound`: WAV sound file played when the screen turns on (default: `"wake.wav"` located in `resource/`). Set to `null` to disable.
 *   `screen_timeout_seconds`: Time (in seconds) the screen stays on after wake word detection before automatically turning off. Set to `null` to leave it on permanently until turned off manually.
 *   `hourly_routine_enabled`: Automatically power on the screen every hour at the top of the hour (default: `true`).
 *   `hourly_routine_duration_seconds`: Duration (in seconds) the screen remains on during each hourly cycle before turning off (default: `600` = 10 minutes).

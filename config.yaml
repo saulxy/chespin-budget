@@ -32,6 +32,12 @@ display_output_id: "HDMI-A-1"
 # Set to null to disable automatic timeout (screen will stay on until manually turned off).
 screen_timeout_seconds: 60
 
+# Sound Notification Settings
+# WAV sound file to play when the screen turns on.
+# The file must be located in the resource folder inside the project folder.
+# Set to null or "" to disable sound playback.
+screen_on_sound: "wake.wav"
+
 # Hourly Screen Routine Settings
 # Automatically turn on the screen at the top of every hour (e.g., 6:00 PM, 7:00 PM)
 # Set to false to disable the hourly routine
@@ -39,3 +45,4 @@ hourly_routine_enabled: true
 
 # Duration in seconds to keep the screen on during the hourly routine (default: 600 = 10 minutes).
 hourly_routine_duration_seconds: 600
+
