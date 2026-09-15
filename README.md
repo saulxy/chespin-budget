@@ -141,10 +141,14 @@ To keep Chespin running continuously in the background, you can set it up as a s
    Restart=always
    RestartSec=5
    Environment=PYTHONUNBUFFERED=1
+   # Required for Wayland / wlr-randr display control on Raspberry Pi OS Bookworm
+   Environment=XDG_RUNTIME_DIR=/run/user/1000
+   Environment=WAYLAND_DISPLAY=wayland-0
 
    [Install]
    WantedBy=multi-user.target
    ```
+   > **Note on Wayland / `wlr-randr`**: If running under a username other than `pi`, replace `1000` with your user's UID (found by running `id -u $USER`). Without `XDG_RUNTIME_DIR` and `WAYLAND_DISPLAY`, `wlr-randr` cannot connect to the Wayland compositor and will fail with `error: XDG_RUNTIME_DIR is invalid or not set in the environment`.
 3. Enable and start the service:
    ```bash
    sudo systemctl daemon-reload
