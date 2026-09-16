@@ -46,3 +46,12 @@ hourly_routine_enabled: true
 # Duration in seconds to keep the screen on during the hourly routine (default: 600 = 10 minutes).
 hourly_routine_duration_seconds: 600
 
+# No Disturb Schedule Settings
+# Automatically disable wake-up screen activation and wake-up audio during quiet hours.
+# Time format: "HH:MM" (24-hour time, e.g. "22:00" to "07:00").
+# Set to false to disable the schedule. Can be manually overridden using: python scripts/no_disturb.py [ON|OFF]
+no_disturb_enabled: true
+no_disturb_start: "22:00"
+no_disturb_end: "07:00"
+
+

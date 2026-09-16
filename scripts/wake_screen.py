@@ -14,6 +14,7 @@ if project_root not in sys.path:
 from chespin.audio import AudioStreamer
 from chespin.screen import ScreenController
 from chespin.detector.vosk_detector import VoskWakeWordDetector
+from chespin.no_disturb import NoDisturbManager
 
 # Initialize Logging
 logging.basicConfig(
