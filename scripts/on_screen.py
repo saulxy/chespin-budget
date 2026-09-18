@@ -24,9 +24,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Turn HDMI Screen ON")
     parser.add_argument(
         "-b", "--backend",
-        choices=["auto", "gnome", "wlr-randr", "vcgencmd", "mock"],
+        choices=["auto", "gnome", "xfce", "wlr-randr", "vcgencmd", "mock"],
         default=None,
-        help="Screen control backend (auto, gnome, wlr-randr, vcgencmd, mock)"
+        help="Screen control backend (auto, gnome, xfce, wlr-randr, vcgencmd, mock)"
     )
     parser.add_argument(
         "-o", "--output",

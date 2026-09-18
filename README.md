@@ -91,8 +91,9 @@ pip install -r requirements.txt
 *   `wake_word_enabled`: Enable or disable wake-word voice listening (default: `true`).
 *   `wake_word`: The word to listen for (default: `"chespin"`).
 *   `screen_backend`: Set to:
-    *   `"auto"`: Automatically detects available tools (GNOME/Mutter, `wlr-randr`, `vcgencmd`, fallback to mock).
+    *   `"auto"`: Automatically detects available tools (GNOME/Mutter, XFCE/xset, `wlr-randr`, `vcgencmd`, fallback to mock).
     *   `"gnome"`: GNOME Mutter DisplayConfig via D-Bus (compatible with **Ubuntu 26.04**, Ubuntu 24.04, Debian GNOME, Fedora).
+    *   `"xfce"`: XFCE DPMS / `xset` / screensaver / `xrandr` (compatible with **XFCE**, Xubuntu, Debian XFCE, Raspberry Pi OS XFCE).
     *   `"wlr-randr"`: Wayland wlroots HDMI control (Raspberry Pi OS Bookworm with labwc/wayfire).
     *   `"vcgencmd"`: X11/legacy Raspberry Pi HDMI control.
     *   `"mock"`: Test mode (logs screen state changes to console without actual hardware calls).
@@ -122,11 +123,12 @@ Both scripts support command-line arguments (run with `-h` or `--help` to view o
     # Uses backend configured in config.yaml (or auto-detected)
     python scripts/on_screen.py
 
-    # Explicitly specify backend (e.g. GNOME on Ubuntu 26.04)
+    # Explicitly specify backend (e.g. GNOME or XFCE)
+    python scripts/on_screen.py --backend xfce
     python scripts/on_screen.py --backend gnome
 
     # Optional: customize sound or output
-    python scripts/on_screen.py --backend gnome --sound wake.wav
+    python scripts/on_screen.py --backend xfce --sound wake.wav
     ```
 
 *   **Turn off the screen:**
@@ -135,6 +137,7 @@ Both scripts support command-line arguments (run with `-h` or `--help` to view o
     python scripts/off_screen.py
 
     # Explicitly specify backend
+    python scripts/off_screen.py --backend xfce
     python scripts/off_screen.py --backend gnome
     ```
 
@@ -142,18 +145,19 @@ Both scripts support command-line arguments (run with `-h` or `--help` to view o
 
 ## Deploying as a Background Systemd Service
 
-Depending on your operating system, choose the deployment method below:
+Depending on your operating system and desktop environment, choose the deployment method below:
 
-### Option A: Systemd User Service (Recommended for Ubuntu 26.04 / GNOME & Desktop Sessions)
+### Option A: Systemd User Service (Recommended for Desktop Sessions)
 
-On modern Linux desktop environments (like Ubuntu 24.04 and 26.04), running as a **user service** is recommended because it runs inside your user session, natively inheriting access to the GNOME Mutter D-Bus session bus, Wayland display, and PipeWire/PulseAudio microphone devices without requiring `sudo` or hardcoded UIDs.
+Running as a **user service** is recommended because it runs inside your user session, natively inheriting access to your desktop session, D-Bus session bus, and microphone devices without requiring `sudo`.
 
 1. Create a user systemd service directory and file:
    ```bash
    mkdir -p ~/.config/systemd/user
    nano ~/.config/systemd/user/chespin.service
    ```
-2. Paste the following configuration:
+
+2. **For GNOME (Ubuntu 24.04 / 26.04 / Wayland):**
    ```ini
    [Unit]
    Description=Chespin Wake Word Screen Activation Daemon
@@ -171,21 +175,43 @@ On modern Linux desktop environments (like Ubuntu 24.04 and 26.04), running as a
    [Install]
    WantedBy=graphical-session.target
    ```
-   *(Note: `%h` automatically resolves to your user's home directory. Adjust paths if your virtualenv or repo is in a different location.)*
 
-3. Enable and start the user service (no `sudo` required):
+3. **For XFCE (Xubuntu / Debian XFCE / X11):**
+   > [!NOTE]
+   > XFCE sessions run under X11 and may not trigger systemd's `graphical-session.target`. Therefore, `WantedBy=default.target` and `Environment=DISPLAY=:0` should be used:
+
+   ```ini
+   [Unit]
+   Description=Chespin Wake Word Screen Activation Daemon
+   After=sound.target
+
+   [Service]
+   Type=simple
+   WorkingDirectory=%h/chespin
+   ExecStart=%h/chespin/.venv/bin/python scripts/wake_screen.py
+   Restart=always
+   RestartSec=5
+   Environment=PYTHONUNBUFFERED=1
+   Environment=DISPLAY=:0
+
+   [Install]
+   WantedBy=default.target
+   ```
+   *(Note: Chespin's internal engine will also automatically fallback to `DISPLAY=:0` and locate `~/.Xauthority` if they are omitted from the service file).*
+
+4. Enable and start the user service (no `sudo` required):
    ```bash
    systemctl --user daemon-reload
    systemctl --user enable chespin.service
    systemctl --user start chespin.service
    ```
 
-4. View service logs:
+5. View service logs:
    ```bash
    journalctl --user -u chespin.service -f
    ```
 
-5. *(Optional)* To allow the user service to start on boot even before you log into the desktop seat:
+6. *(Optional)* To allow the user service to start on boot even before you log into the desktop seat:
    ```bash
    loginctl enable-linger $USER
    ```
@@ -220,6 +246,10 @@ For dedicated appliances, kiosks, or headless setups running under `/etc/systemd
    Environment=XDG_RUNTIME_DIR=/run/user/1000
    Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
    Environment=WAYLAND_DISPLAY=wayland-0
+
+   # Required for XFCE / X11 display control:
+   Environment=DISPLAY=:0
+   Environment=XAUTHORITY=/home/pi/.Xauthority
 
    [Install]
    WantedBy=multi-user.target

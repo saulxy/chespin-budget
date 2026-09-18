@@ -26,8 +26,22 @@ class ScreenController:
         if self.sound_file:
             logger.info(f"Screen activation sound configured: {self.sound_file}")
 
+    def _is_xfce_environment(self):
+        """Detect if the current environment is an XFCE desktop session."""
+        desktop = (os.environ.get("XDG_CURRENT_DESKTOP") or "").lower()
+        session = (os.environ.get("DESKTOP_SESSION") or "").lower()
+        if any(term in desktop for term in ["xfce", "xubuntu"]) or any(term in session for term in ["xfce", "xubuntu"]):
+            return True
+        if os.environ.get("XDG_MENU_PREFIX") == "xfce-":
+            return True
+        if shutil.which("xfce4-session") or shutil.which("xfsettingsd") or shutil.which("xfconf-query"):
+            return True
+        return False
+
     def _is_gnome_environment(self):
         """Detect if the current environment is a GNOME desktop session."""
+        if self._is_xfce_environment():
+            return False
         desktop = (os.environ.get("XDG_CURRENT_DESKTOP") or "").lower()
         session = (os.environ.get("DESKTOP_SESSION") or "").lower()
         if any(term in desktop for term in ["gnome", "ubuntu"]) or any(term in session for term in ["gnome", "ubuntu"]):
@@ -47,10 +61,14 @@ class ScreenController:
         # Auto-detect tools on the system PATH and environment
         if self._is_gnome_environment() and (shutil.which("busctl") or shutil.which("gdbus")):
             return "gnome"
+        elif self._is_xfce_environment() and (shutil.which("xset") or shutil.which("xfce4-screensaver-command") or shutil.which("xrandr")):
+            return "xfce"
         elif shutil.which("wlr-randr") is not None:
             return "wlr-randr"
         elif shutil.which("vcgencmd") is not None:
             return "vcgencmd"
+        elif shutil.which("xset") is not None:
+            return "xfce"
         elif shutil.which("busctl") or shutil.which("gdbus"):
             # Check if Mutter DisplayConfig interface responds via busctl
             try:
@@ -208,7 +226,7 @@ class ScreenController:
         return False
 
     def _gnome_turn_on(self):
-        """Power ON screen on GNOME via Mutter D-Bus DisplayConfig and screensaver."""
+        """Power ON screen on GNOME via Mutter D-Bus DisplayConfig."""
         success = False
 
         # 1. Try busctl to set PowerSaveMode to 0 (On)
@@ -219,7 +237,7 @@ class ScreenController:
                 "/org/gnome/Mutter/DisplayConfig",
                 "org.gnome.Mutter.DisplayConfig",
                 "PowerSaveMode", "i", "0"
-            ])
+            ], silent_fail=True)
 
         # 2. Try gdbus if busctl was not available or failed
         if not success and shutil.which("gdbus"):
@@ -229,31 +247,17 @@ class ScreenController:
                 "--object-path", "/org/gnome/Mutter/DisplayConfig",
                 "--method", "org.freedesktop.DBus.Properties.Set",
                 "org.gnome.Mutter.DisplayConfig", "PowerSaveMode", "<int32 0>"
-            ])
+            ], silent_fail=True)
 
-        # 3. Simulate user activity to unblank/wake up screensaver in GNOME
-        if shutil.which("busctl"):
-            self._run_command([
-                "busctl", "--user", "call",
-                "org.gnome.ScreenSaver",
-                "/org/gnome/ScreenSaver",
-                "org.gnome.ScreenSaver",
-                "SimulateUserActivity"
-            ])
-        elif shutil.which("gdbus"):
-            self._run_command([
-                "gdbus", "call", "--session",
-                "--dest", "org.gnome.ScreenSaver",
-                "--object-path", "/org/gnome/ScreenSaver",
-                "--method", "org.gnome.ScreenSaver.SimulateUserActivity"
-            ])
-
-        # 4. Fallback utilities for legacy or alternate GNOME sessions
+        # 3. Fallback utilities for legacy or alternate GNOME sessions (e.g. X11)
         if not success:
             if shutil.which("gnome-screensaver-command"):
-                success = self._run_command(["gnome-screensaver-command", "-d"])
+                success = self._run_command(["gnome-screensaver-command", "-d"], silent_fail=True)
             elif shutil.which("xset"):
-                success = self._run_command(["xset", "dpms", "force", "on"])
+                success = self._run_command(["xset", "dpms", "force", "on"], silent_fail=True)
+
+        if not success:
+            logger.error("Failed to turn screen ON via GNOME Mutter DisplayConfig.")
 
         return success
 
@@ -269,7 +273,7 @@ class ScreenController:
                 "/org/gnome/Mutter/DisplayConfig",
                 "org.gnome.Mutter.DisplayConfig",
                 "PowerSaveMode", "i", "1"
-            ])
+            ], silent_fail=True)
             if not success:
                 success = self._run_command([
                     "busctl", "--user", "set-property",
@@ -277,7 +281,7 @@ class ScreenController:
                     "/org/gnome/Mutter/DisplayConfig",
                     "org.gnome.Mutter.DisplayConfig",
                     "PowerSaveMode", "i", "3"
-                ])
+                ], silent_fail=True)
 
         # 2. Try gdbus if busctl was not available or failed
         if not success and shutil.which("gdbus"):
@@ -287,7 +291,7 @@ class ScreenController:
                 "--object-path", "/org/gnome/Mutter/DisplayConfig",
                 "--method", "org.freedesktop.DBus.Properties.Set",
                 "org.gnome.Mutter.DisplayConfig", "PowerSaveMode", "<int32 1>"
-            ])
+            ], silent_fail=True)
             if not success:
                 success = self._run_command([
                     "gdbus", "call", "--session",
@@ -295,29 +299,81 @@ class ScreenController:
                     "--object-path", "/org/gnome/Mutter/DisplayConfig",
                     "--method", "org.freedesktop.DBus.Properties.Set",
                     "org.gnome.Mutter.DisplayConfig", "PowerSaveMode", "<int32 3>"
-                ])
+                ], silent_fail=True)
 
-        # 3. Fallback: activate screensaver or xset if Mutter DisplayConfig is inaccessible
+        # 3. Fallback: legacy screensaver or xset if Mutter DisplayConfig is inaccessible
         if not success:
-            if shutil.which("busctl"):
-                success = self._run_command([
-                    "busctl", "--user", "call",
-                    "org.gnome.ScreenSaver",
-                    "/org/gnome/ScreenSaver",
-                    "org.gnome.ScreenSaver",
-                    "SetActive", "b", "true"
-                ])
-            elif shutil.which("gdbus"):
-                success = self._run_command([
-                    "gdbus", "call", "--session",
-                    "--dest", "org.gnome.ScreenSaver",
-                    "--object-path", "/org/gnome/ScreenSaver",
-                    "--method", "org.gnome.ScreenSaver.SetActive", "true"
-                ])
-            elif shutil.which("gnome-screensaver-command"):
-                success = self._run_command(["gnome-screensaver-command", "-a"])
+            if shutil.which("gnome-screensaver-command"):
+                success = self._run_command(["gnome-screensaver-command", "-a"], silent_fail=True)
             elif shutil.which("xset"):
-                success = self._run_command(["xset", "dpms", "force", "off"])
+                success = self._run_command(["xset", "dpms", "force", "off"], silent_fail=True)
+
+        if not success:
+            logger.error("Failed to turn screen OFF via GNOME Mutter DisplayConfig.")
+
+        return success
+
+    def _xfce_turn_on(self):
+        """Power ON screen on XFCE via xset, xfce4-screensaver, or xrandr."""
+        success = False
+
+        # 1. Primary: xset DPMS force on + reset screensaver timer
+        if shutil.which("xset"):
+            success = self._run_command(["xset", "dpms", "force", "on"], silent_fail=True)
+            if success:
+                self._run_command(["xset", "s", "reset"], silent_fail=True)
+
+        # 2. Deactivate screensaver if xfce4-screensaver-command is available
+        if shutil.which("xfce4-screensaver-command"):
+            ss_success = self._run_command(["xfce4-screensaver-command", "--deactivate"], silent_fail=True)
+            if not ss_success:
+                self._run_command(["xfce4-screensaver-command", "--poke"], silent_fail=True)
+            if not success and ss_success:
+                success = True
+
+        # 3. Output fallback via xrandr
+        if not success and shutil.which("xrandr"):
+            if self.output_id:
+                success = self._run_command(["xrandr", "--output", self.output_id, "--auto"], silent_fail=True)
+            if not success:
+                detected = self._get_xrandr_outputs()
+                for out_id in detected:
+                    if self._run_command(["xrandr", "--output", out_id, "--auto"], silent_fail=True):
+                        self.output_id = out_id
+                        success = True
+                        break
+
+        if not success:
+            logger.error("Failed to turn screen ON via XFCE commands (xset, xfce4-screensaver-command, xrandr).")
+
+        return success
+
+    def _xfce_turn_off(self):
+        """Power OFF screen on XFCE via xset, xfce4-screensaver, or xrandr."""
+        success = False
+
+        # 1. Primary: xset DPMS force off
+        if shutil.which("xset"):
+            success = self._run_command(["xset", "dpms", "force", "off"], silent_fail=True)
+
+        # 2. Fallback: activate screensaver
+        if not success and shutil.which("xfce4-screensaver-command"):
+            success = self._run_command(["xfce4-screensaver-command", "--activate"], silent_fail=True)
+
+        # 3. Fallback: turn off via xrandr
+        if not success and shutil.which("xrandr"):
+            if self.output_id:
+                success = self._run_command(["xrandr", "--output", self.output_id, "--off"], silent_fail=True)
+            if not success:
+                detected = self._get_xrandr_outputs()
+                for out_id in detected:
+                    if self._run_command(["xrandr", "--output", out_id, "--off"], silent_fail=True):
+                        self.output_id = out_id
+                        success = True
+                        break
+
+        if not success:
+            logger.error("Failed to turn screen OFF via XFCE commands (xset, xfce4-screensaver-command, xrandr).")
 
         return success
 
@@ -328,6 +384,8 @@ class ScreenController:
         
         if self.backend in ["gnome", "mutter"]:
             success = self._gnome_turn_on()
+        elif self.backend == "xfce":
+            success = self._xfce_turn_on()
         elif self.backend == "wlr-randr":
             # 1. Try with configured output_id + --preferred (fixes 'failed to apply configuration')
             success = self._run_command(["wlr-randr", "--output", self.output_id, "--on", "--preferred"])
@@ -374,6 +432,8 @@ class ScreenController:
         
         if self.backend in ["gnome", "mutter"]:
             success = self._gnome_turn_off()
+        elif self.backend == "xfce":
+            success = self._xfce_turn_off()
         elif self.backend == "wlr-randr":
             success = self._run_command(["wlr-randr", "--output", self.output_id, "--off"])
             
@@ -451,6 +511,24 @@ class ScreenController:
         if "WAYLAND_DISPLAY" not in env:
             env["WAYLAND_DISPLAY"] = "wayland-0"
 
+        # Ensure DISPLAY is configured for X11 / XFCE sessions
+        if "DISPLAY" not in env:
+            env["DISPLAY"] = ":0"
+
+        # Ensure XAUTHORITY is resolved if missing
+        if "XAUTHORITY" not in env:
+            home = env.get("HOME")
+            if home and os.path.isfile(os.path.join(home, ".Xauthority")):
+                env["XAUTHORITY"] = os.path.join(home, ".Xauthority")
+            else:
+                try:
+                    for cand in glob.glob("/home/*/.Xauthority"):
+                        if os.path.isfile(cand):
+                            env["XAUTHORITY"] = cand
+                            break
+                except Exception:
+                    pass
+
         # Ensure DBUS_SESSION_BUS_ADDRESS is configured for user session D-Bus calls if missing
         if "DBUS_SESSION_BUS_ADDRESS" not in env and env.get("XDG_RUNTIME_DIR"):
             bus_socket = os.path.join(env["XDG_RUNTIME_DIR"], "bus")
@@ -459,6 +537,20 @@ class ScreenController:
                 logger.debug(f"Auto-configured DBUS_SESSION_BUS_ADDRESS={env['DBUS_SESSION_BUS_ADDRESS']}")
 
         return env
+
+    def _get_xrandr_outputs(self):
+        """Query xrandr for connected display names."""
+        try:
+            res = subprocess.run(["xrandr"], env=self._get_env(), capture_output=True, text=True)
+            outputs = []
+            for line in res.stdout.splitlines():
+                if " connected" in line:
+                    parts = line.split()
+                    if parts:
+                        outputs.append(parts[0])
+            return outputs
+        except Exception:
+            return []
 
     def _get_wlr_outputs(self):
         """Query wlr-randr for available output display names."""
@@ -474,7 +566,7 @@ class ScreenController:
         except Exception:
             return []
 
-    def _run_command(self, cmd):
+    def _run_command(self, cmd, silent_fail=False):
         """Execute a subprocess command and handle logging/exceptions."""
         try:
             logger.debug(f"Executing system command: {' '.join(cmd)}")
@@ -484,16 +576,22 @@ class ScreenController:
             return True
         except subprocess.CalledProcessError as e:
             err_msg = e.stderr.strip() if e.stderr else str(e)
-            logger.error(f"Command failed (code {e.returncode}): {err_msg}")
-            if "XDG_RUNTIME_DIR" in err_msg or "wayland" in err_msg.lower():
-                logger.warning(
-                    "Hint: Wayland environment variables (XDG_RUNTIME_DIR or WAYLAND_DISPLAY) may be missing or inaccessible. "
-                    "If running under systemd, add 'Environment=XDG_RUNTIME_DIR=/run/user/1000' and "
-                    "'Environment=WAYLAND_DISPLAY=wayland-0' to your service unit file."
-                )
+            if not silent_fail:
+                logger.error(f"Command failed (code {e.returncode}): {err_msg}")
+                if "XDG_RUNTIME_DIR" in err_msg or "wayland" in err_msg.lower():
+                    logger.warning(
+                        "Hint: Wayland environment variables (XDG_RUNTIME_DIR or WAYLAND_DISPLAY) may be missing or inaccessible. "
+                        "If running under systemd, add 'Environment=XDG_RUNTIME_DIR=/run/user/1000' and "
+                        "'Environment=WAYLAND_DISPLAY=wayland-0' to your service unit file."
+                    )
+            else:
+                logger.debug(f"Command failed silently (code {e.returncode}): {err_msg}")
             return False
         except Exception as e:
-            logger.error(f"Unexpected error running command '{cmd[0]}': {e}")
+            if not silent_fail:
+                logger.error(f"Unexpected error running command '{cmd[0]}': {e}")
+            else:
+                logger.debug(f"Unexpected error running command '{cmd[0]}' silently: {e}")
             return False
 
 if __name__ == "__main__":
