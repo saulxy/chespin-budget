@@ -17,9 +17,10 @@ vosk_model_path: "models/vosk-model-small-en-us-0.15"
 audio_device_index: "mic_chespin"
 
 # HDMI Control Settings
-# Supported backends: "auto", "wlr-randr", "vcgencmd", "mock"
-# - "auto": Detects available environment tools (first wlr-randr, then vcgencmd, fallback to mock)
-# - "wlr-randr": Wayland HDMI control (for modern Pi OS e.g., Bookworm)
+# Supported backends: "auto", "gnome", "wlr-randr", "vcgencmd", "mock"
+# - "auto": Detects available environment tools (GNOME/Mutter, wlr-randr, vcgencmd, fallback to mock)
+# - "gnome": GNOME Mutter DisplayConfig / D-Bus (compatible with Ubuntu 24.04, 26.04, Debian GNOME, Fedora)
+# - "wlr-randr": Wayland HDMI control (for modern Pi OS e.g., Bookworm with labwc/wayfire)
 # - "vcgencmd": X11/legacy HDMI control
 # - "mock": Test mode (logs screen state changes to console without actual hardware calls)
 screen_backend: "auto"

@@ -18,7 +18,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger("off_screen")
 
+import argparse
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Turn HDMI Screen OFF")
+    parser.add_argument(
+        "-b", "--backend",
+        choices=["auto", "gnome", "wlr-randr", "vcgencmd", "mock"],
+        default=None,
+        help="Screen control backend (auto, gnome, wlr-randr, vcgencmd, mock)"
+    )
+    parser.add_argument(
+        "-o", "--output",
+        dest="output_id",
+        default=None,
+        help="Display output ID (e.g. HDMI-A-1, primarily used for wlr-randr)"
+    )
+    return parser.parse_args()
+
 def main():
+    args = parse_args()
     config_path = os.path.join(project_root, "config.yaml")
     backend = "auto"
     output_id = "HDMI-A-1"
@@ -33,6 +52,12 @@ def main():
                     output_id = config.get("display_output_id", "HDMI-A-1")
         except Exception as e:
             logger.warning(f"Could not read config.yaml ({e}). Proceeding with default values.")
+
+    # Command line arguments override config file values if provided
+    if args.backend is not None:
+        backend = args.backend
+    if args.output_id is not None:
+        output_id = args.output_id
 
     logger.info(f"Triggering screen OFF command via backend: '{backend}'...")
     try:

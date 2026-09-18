@@ -90,7 +90,12 @@ pip install -r requirements.txt
 
 *   `wake_word_enabled`: Enable or disable wake-word voice listening (default: `true`).
 *   `wake_word`: The word to listen for (default: `"chespin"`).
-*   `screen_backend`: Set to `"auto"` (detects Raspberry Pi system settings automatically), `"wlr-randr"` (Wayland), `"vcgencmd"` (X11/legacy), or `"mock"` (print to console only, useful for testing on Windows/non-Pi).
+*   `screen_backend`: Set to:
+    *   `"auto"`: Automatically detects available tools (GNOME/Mutter, `wlr-randr`, `vcgencmd`, fallback to mock).
+    *   `"gnome"`: GNOME Mutter DisplayConfig via D-Bus (compatible with **Ubuntu 26.04**, Ubuntu 24.04, Debian GNOME, Fedora).
+    *   `"wlr-randr"`: Wayland wlroots HDMI control (Raspberry Pi OS Bookworm with labwc/wayfire).
+    *   `"vcgencmd"`: X11/legacy Raspberry Pi HDMI control.
+    *   `"mock"`: Test mode (logs screen state changes to console without actual hardware calls).
 *   `screen_on_sound`: WAV sound file played when the screen turns on (default: `"wake.wav"` located in `resource/`). Set to `null` to disable.
 *   `screen_timeout_seconds`: Time (in seconds) the screen stays on after wake word detection before automatically turning off. Set to `null` to leave it on permanently until turned off manually.
 *   `hourly_routine_enabled`: Automatically power on the screen every hour at the top of the hour (default: `true`).
@@ -110,27 +115,92 @@ Speak your wake word **"CHESPIN"** (or whatever word is configured). You will se
 
 ### Turn Screen On / Off Manually
 
-To manually turn on the HDMI port:
-```bash
-python scripts/on_screen.py
-```
+Both scripts support command-line arguments (run with `-h` or `--help` to view options):
 
-To manually turn off the HDMI port:
-```bash
-python scripts/off_screen.py
-```
+*   **Turn on the screen:**
+    ```bash
+    # Uses backend configured in config.yaml (or auto-detected)
+    python scripts/on_screen.py
+
+    # Explicitly specify backend (e.g. GNOME on Ubuntu 26.04)
+    python scripts/on_screen.py --backend gnome
+
+    # Optional: customize sound or output
+    python scripts/on_screen.py --backend gnome --sound wake.wav
+    ```
+
+*   **Turn off the screen:**
+    ```bash
+    # Uses backend configured in config.yaml (or auto-detected)
+    python scripts/off_screen.py
+
+    # Explicitly specify backend
+    python scripts/off_screen.py --backend gnome
+    ```
 
 ---
 
-## Deploying as a Background Systemd Service (Raspberry Pi)
+## Deploying as a Background Systemd Service
 
-To keep Chespin running continuously in the background, you can set it up as a systemd service.
+Depending on your operating system, choose the deployment method below:
+
+### Option A: Systemd User Service (Recommended for Ubuntu 26.04 / GNOME & Desktop Sessions)
+
+On modern Linux desktop environments (like Ubuntu 24.04 and 26.04), running as a **user service** is recommended because it runs inside your user session, natively inheriting access to the GNOME Mutter D-Bus session bus, Wayland display, and PipeWire/PulseAudio microphone devices without requiring `sudo` or hardcoded UIDs.
+
+1. Create a user systemd service directory and file:
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   nano ~/.config/systemd/user/chespin.service
+   ```
+2. Paste the following configuration:
+   ```ini
+   [Unit]
+   Description=Chespin Wake Word Screen Activation Daemon
+   After=graphical-session.target sound.target
+   PartOf=graphical-session.target
+
+   [Service]
+   Type=simple
+   WorkingDirectory=%h/chespin
+   ExecStart=%h/chespin/.venv/bin/python scripts/wake_screen.py
+   Restart=always
+   RestartSec=5
+   Environment=PYTHONUNBUFFERED=1
+
+   [Install]
+   WantedBy=graphical-session.target
+   ```
+   *(Note: `%h` automatically resolves to your user's home directory. Adjust paths if your virtualenv or repo is in a different location.)*
+
+3. Enable and start the user service (no `sudo` required):
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable chespin.service
+   systemctl --user start chespin.service
+   ```
+
+4. View service logs:
+   ```bash
+   journalctl --user -u chespin.service -f
+   ```
+
+5. *(Optional)* To allow the user service to start on boot even before you log into the desktop seat:
+   ```bash
+   loginctl enable-linger $USER
+   ```
+
+---
+
+### Option B: System-Wide Service (For Raspberry Pi OS / Kiosk / Root)
+
+For dedicated appliances, kiosks, or headless setups running under `/etc/systemd/system/`:
 
 1. Create a service file:
    ```bash
    sudo nano /etc/systemd/system/chespin.service
    ```
-2. Paste the following configuration (replace `/home/pi/chespin` and `/usr/bin/python3` with your actual project directory and Python executable paths):
+2. Paste the following configuration (replace `pi` with your actual username, and adjust paths as needed):
    ```ini
    [Unit]
    Description=Chespin Wake Word Screen Activation Daemon
@@ -144,14 +214,16 @@ To keep Chespin running continuously in the background, you can set it up as a s
    Restart=always
    RestartSec=5
    Environment=PYTHONUNBUFFERED=1
-   # Required for Wayland / wlr-randr display control on Raspberry Pi OS Bookworm
+
+   # Required for Wayland / wlr-randr and GNOME D-Bus display control:
+   # Replace 1000 with your user's UID (check using: id -u $USER)
    Environment=XDG_RUNTIME_DIR=/run/user/1000
+   Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
    Environment=WAYLAND_DISPLAY=wayland-0
 
    [Install]
    WantedBy=multi-user.target
    ```
-   > **Note on Wayland / `wlr-randr`**: If running under a username other than `pi`, replace `1000` with your user's UID (found by running `id -u $USER`). Without `XDG_RUNTIME_DIR` and `WAYLAND_DISPLAY`, `wlr-randr` cannot connect to the Wayland compositor and will fail with `error: XDG_RUNTIME_DIR is invalid or not set in the environment`.
 3. Enable and start the service:
    ```bash
    sudo systemctl daemon-reload

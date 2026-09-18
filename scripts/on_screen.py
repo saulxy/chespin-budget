@@ -18,7 +18,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger("on_screen")
 
+import argparse
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Turn HDMI Screen ON")
+    parser.add_argument(
+        "-b", "--backend",
+        choices=["auto", "gnome", "wlr-randr", "vcgencmd", "mock"],
+        default=None,
+        help="Screen control backend (auto, gnome, wlr-randr, vcgencmd, mock)"
+    )
+    parser.add_argument(
+        "-o", "--output",
+        dest="output_id",
+        default=None,
+        help="Display output ID (e.g. HDMI-A-1, primarily used for wlr-randr)"
+    )
+    parser.add_argument(
+        "-s", "--sound",
+        dest="sound_file",
+        default=None,
+        help="Path or filename of sound file to play on wake"
+    )
+    return parser.parse_args()
+
 def main():
+    args = parse_args()
     config_path = os.path.join(project_root, "config.yaml")
     backend = "auto"
     output_id = "HDMI-A-1"
@@ -35,6 +60,14 @@ def main():
                     sound_file = config.get("screen_on_sound", config.get("sound_file", None))
         except Exception as e:
             logger.warning(f"Could not read config.yaml ({e}). Proceeding with default values.")
+
+    # Command line arguments override config file values if provided
+    if args.backend is not None:
+        backend = args.backend
+    if args.output_id is not None:
+        output_id = args.output_id
+    if args.sound_file is not None:
+        sound_file = args.sound_file
 
     logger.info(f"Triggering screen ON command via backend: '{backend}'...")
     try:

@@ -26,18 +26,47 @@ class ScreenController:
         if self.sound_file:
             logger.info(f"Screen activation sound configured: {self.sound_file}")
 
+    def _is_gnome_environment(self):
+        """Detect if the current environment is a GNOME desktop session."""
+        desktop = (os.environ.get("XDG_CURRENT_DESKTOP") or "").lower()
+        session = (os.environ.get("DESKTOP_SESSION") or "").lower()
+        if any(term in desktop for term in ["gnome", "ubuntu"]) or any(term in session for term in ["gnome", "ubuntu"]):
+            return True
+        if os.environ.get("GNOME_DESKTOP_SESSION_ID"):
+            return True
+        if shutil.which("gnome-shell") or shutil.which("mutter"):
+            if shutil.which("busctl") or shutil.which("gdbus"):
+                return True
+        return False
+
     def _resolve_backend(self, backend):
         """Determine which backend to use depending on system tools available."""
         if backend != "auto":
             return backend
 
-        # Auto-detect tools on the system PATH
-        if shutil.which("wlr-randr") is not None:
+        # Auto-detect tools on the system PATH and environment
+        if self._is_gnome_environment() and (shutil.which("busctl") or shutil.which("gdbus")):
+            return "gnome"
+        elif shutil.which("wlr-randr") is not None:
             return "wlr-randr"
         elif shutil.which("vcgencmd") is not None:
             return "vcgencmd"
+        elif shutil.which("busctl") or shutil.which("gdbus"):
+            # Check if Mutter DisplayConfig interface responds via busctl
+            try:
+                env = self._get_env()
+                res = subprocess.run(
+                    ["busctl", "--user", "get-property", "org.gnome.Mutter.DisplayConfig",
+                     "/org/gnome/Mutter/DisplayConfig", "org.gnome.Mutter.DisplayConfig", "PowerSaveMode"],
+                    env=env, capture_output=True, text=True, timeout=1
+                )
+                if res.returncode == 0:
+                    return "gnome"
+            except Exception:
+                pass
+            return "mock"
         else:
-            logger.warning("Neither 'wlr-randr' nor 'vcgencmd' was found in PATH. Falling back to 'mock' mode.")
+            logger.warning("No compatible screen controller tool found in PATH. Falling back to 'mock' mode.")
             return "mock"
 
     def _resolve_sound_path(self, sound_name):
@@ -178,12 +207,128 @@ class ScreenController:
 
         return False
 
+    def _gnome_turn_on(self):
+        """Power ON screen on GNOME via Mutter D-Bus DisplayConfig and screensaver."""
+        success = False
+
+        # 1. Try busctl to set PowerSaveMode to 0 (On)
+        if shutil.which("busctl"):
+            success = self._run_command([
+                "busctl", "--user", "set-property",
+                "org.gnome.Mutter.DisplayConfig",
+                "/org/gnome/Mutter/DisplayConfig",
+                "org.gnome.Mutter.DisplayConfig",
+                "PowerSaveMode", "i", "0"
+            ])
+
+        # 2. Try gdbus if busctl was not available or failed
+        if not success and shutil.which("gdbus"):
+            success = self._run_command([
+                "gdbus", "call", "--session",
+                "--dest", "org.gnome.Mutter.DisplayConfig",
+                "--object-path", "/org/gnome/Mutter/DisplayConfig",
+                "--method", "org.freedesktop.DBus.Properties.Set",
+                "org.gnome.Mutter.DisplayConfig", "PowerSaveMode", "<int32 0>"
+            ])
+
+        # 3. Simulate user activity to unblank/wake up screensaver in GNOME
+        if shutil.which("busctl"):
+            self._run_command([
+                "busctl", "--user", "call",
+                "org.gnome.ScreenSaver",
+                "/org/gnome/ScreenSaver",
+                "org.gnome.ScreenSaver",
+                "SimulateUserActivity"
+            ])
+        elif shutil.which("gdbus"):
+            self._run_command([
+                "gdbus", "call", "--session",
+                "--dest", "org.gnome.ScreenSaver",
+                "--object-path", "/org/gnome/ScreenSaver",
+                "--method", "org.gnome.ScreenSaver.SimulateUserActivity"
+            ])
+
+        # 4. Fallback utilities for legacy or alternate GNOME sessions
+        if not success:
+            if shutil.which("gnome-screensaver-command"):
+                success = self._run_command(["gnome-screensaver-command", "-d"])
+            elif shutil.which("xset"):
+                success = self._run_command(["xset", "dpms", "force", "on"])
+
+        return success
+
+    def _gnome_turn_off(self):
+        """Power OFF screen on GNOME via Mutter D-Bus DisplayConfig."""
+        success = False
+
+        # 1. Try busctl to set PowerSaveMode to 1 (Standby) or 3 (Off)
+        if shutil.which("busctl"):
+            success = self._run_command([
+                "busctl", "--user", "set-property",
+                "org.gnome.Mutter.DisplayConfig",
+                "/org/gnome/Mutter/DisplayConfig",
+                "org.gnome.Mutter.DisplayConfig",
+                "PowerSaveMode", "i", "1"
+            ])
+            if not success:
+                success = self._run_command([
+                    "busctl", "--user", "set-property",
+                    "org.gnome.Mutter.DisplayConfig",
+                    "/org/gnome/Mutter/DisplayConfig",
+                    "org.gnome.Mutter.DisplayConfig",
+                    "PowerSaveMode", "i", "3"
+                ])
+
+        # 2. Try gdbus if busctl was not available or failed
+        if not success and shutil.which("gdbus"):
+            success = self._run_command([
+                "gdbus", "call", "--session",
+                "--dest", "org.gnome.Mutter.DisplayConfig",
+                "--object-path", "/org/gnome/Mutter/DisplayConfig",
+                "--method", "org.freedesktop.DBus.Properties.Set",
+                "org.gnome.Mutter.DisplayConfig", "PowerSaveMode", "<int32 1>"
+            ])
+            if not success:
+                success = self._run_command([
+                    "gdbus", "call", "--session",
+                    "--dest", "org.gnome.Mutter.DisplayConfig",
+                    "--object-path", "/org/gnome/Mutter/DisplayConfig",
+                    "--method", "org.freedesktop.DBus.Properties.Set",
+                    "org.gnome.Mutter.DisplayConfig", "PowerSaveMode", "<int32 3>"
+                ])
+
+        # 3. Fallback: activate screensaver or xset if Mutter DisplayConfig is inaccessible
+        if not success:
+            if shutil.which("busctl"):
+                success = self._run_command([
+                    "busctl", "--user", "call",
+                    "org.gnome.ScreenSaver",
+                    "/org/gnome/ScreenSaver",
+                    "org.gnome.ScreenSaver",
+                    "SetActive", "b", "true"
+                ])
+            elif shutil.which("gdbus"):
+                success = self._run_command([
+                    "gdbus", "call", "--session",
+                    "--dest", "org.gnome.ScreenSaver",
+                    "--object-path", "/org/gnome/ScreenSaver",
+                    "--method", "org.gnome.ScreenSaver.SetActive", "true"
+                ])
+            elif shutil.which("gnome-screensaver-command"):
+                success = self._run_command(["gnome-screensaver-command", "-a"])
+            elif shutil.which("xset"):
+                success = self._run_command(["xset", "dpms", "force", "off"])
+
+        return success
+
     def turn_on(self):
         """Power ON the screen."""
         logger.info("Command: Turn Screen ON")
         success = False
         
-        if self.backend == "wlr-randr":
+        if self.backend in ["gnome", "mutter"]:
+            success = self._gnome_turn_on()
+        elif self.backend == "wlr-randr":
             # 1. Try with configured output_id + --preferred (fixes 'failed to apply configuration')
             success = self._run_command(["wlr-randr", "--output", self.output_id, "--on", "--preferred"])
             
@@ -227,7 +372,9 @@ class ScreenController:
         logger.info("Command: Turn Screen OFF")
         success = False
         
-        if self.backend == "wlr-randr":
+        if self.backend in ["gnome", "mutter"]:
+            success = self._gnome_turn_off()
+        elif self.backend == "wlr-randr":
             success = self._run_command(["wlr-randr", "--output", self.output_id, "--off"])
             
             # If configured output_id failed, try detected outputs
@@ -256,7 +403,7 @@ class ScreenController:
         return success
 
     def _get_env(self):
-        """Prepare environment variables needed for Wayland/wlr-randr."""
+        """Prepare environment variables needed for Wayland, D-Bus, and GNOME."""
         env = os.environ.copy()
 
         # Check if XDG_RUNTIME_DIR is already set and valid
@@ -303,6 +450,13 @@ class ScreenController:
         # Ensure WAYLAND_DISPLAY has a default fallback if missing
         if "WAYLAND_DISPLAY" not in env:
             env["WAYLAND_DISPLAY"] = "wayland-0"
+
+        # Ensure DBUS_SESSION_BUS_ADDRESS is configured for user session D-Bus calls if missing
+        if "DBUS_SESSION_BUS_ADDRESS" not in env and env.get("XDG_RUNTIME_DIR"):
+            bus_socket = os.path.join(env["XDG_RUNTIME_DIR"], "bus")
+            if os.path.exists(bus_socket):
+                env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus_socket}"
+                logger.debug(f"Auto-configured DBUS_SESSION_BUS_ADDRESS={env['DBUS_SESSION_BUS_ADDRESS']}")
 
         return env
 
